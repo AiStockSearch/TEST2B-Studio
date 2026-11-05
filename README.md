@@ -1,24 +1,25 @@
 # Мини-CRM «Объекты и задачи»
 
-Тестовое задание 2B Studio. Постановщик ставит задачи по объектам (стройкам), исполнители берут их в работу и отдают на проверку. Каждая смена статуса записывается в историю.
+Тестовое задание 2B Studio. Постановщик ставит задачи по объектам (стройкам), исполнители берут их в работу и отдают на проверку. Каждая смена статуса записывается в историю. К задаче прикладываются фото: постановщик — «фото к заданию», исполнитель — «фото результата» при отправке на проверку.
 
 ## Стек
 - **Next.js 15** (App Router, Server Actions) + **TypeScript**
-- **Supabase**: Postgres, Auth (email + пароль), RLS
+- **Supabase**: Postgres, Auth (email + пароль), RLS, Storage (приватный bucket `task-photos`)
 - **Prisma 7** (`@prisma/adapter-pg`): серверный доступ к БД, каждый запрос идёт от имени пользователя (см. «Безопасность»)
-- **shadcn/ui** + Tailwind CSS 4, **Zustand** (только UI-состояние: фильтры, поиск)
+- **shadcn/ui** + Tailwind CSS 4, **Zustand** (только UI-состояние: вид списка объектов; фильтры — в URL)
 - Тесты: Vitest (таблица переходов), Playwright (e2e по ролям), SQL-тесты политик, скрипт проверок «в обход UI»
 
 ## Структура
 ```
 supabase/migrations/   схема, RLS, триггеры переходов и истории, RPC change_task_status (источник правды)
-supabase/tests/        SQL-тесты RLS и переходов (40 проверок, в транзакции с rollback)
+supabase/tests/        SQL-тесты RLS, переходов и вложений (в транзакции с rollback)
 supabase/seed.sql      демо-данные: 3 объекта, 8 задач в разных статусах
 prisma/schema.prisma   модели под существующую схему (prisma db pull), migrate не используется
 src/lib/workflow.ts    таблица переходов (зеркало public.task_transition_actor) → кнопки в UI
 src/lib/data/          слой данных: prisma-repo (основной) и supabase-repo (PostgREST), общий интерфейс Repo
 src/lib/session.ts     пользователь через supabase.auth.getUser() на сервере, роль из profiles
 src/middleware.ts      защита маршрутов и обновление сессии
+src/lib/attachments/   правила фото (тип, 5 МБ, 5 шт.), загрузка в Storage, signed URLs
 src/app/               экраны: /login, /objects, /objects/[id], /tasks/[id], /my-tasks
 scripts/security-check.ts  прямые запросы к Supabase от имени исполнителя: всё запрещённое должно отклоняться
 tests/, e2e/           unit и e2e
@@ -53,7 +54,7 @@ npm test                 # unit: таблица переходов совпад�
 npm run test:security    # REST от имени исполнителя: чужое не читается и не меняется, запрещённые переходы отклоняются
 npx playwright install chromium && npm run build && npm start &
 E2E_BASE_URL=http://localhost:3000 npx playwright test   # e2e: роли, чужая задача, полный цикл статусов (за собой убирает)
-supabase/tests/run-local.sh   # SQL-тесты политик на локальном Postgres; облачный вариант: rls_and_workflow.cloud.test.sql
+supabase/tests/run-local.sh   # SQL-тесты политик на локальном Postgres; облачные варианты: rls_and_workflow.cloud.test.sql, attachments.cloud.test.sql
 npm run lint && npm run typecheck
 ```
 
@@ -63,6 +64,7 @@ npm run lint && npm run typecheck
 - **История** пишется AFTER-триггером. У клиентов есть только `SELECT`, поэтому подделать, изменить или удалить её через API нельзя.
 - **Prisma не обходит RLS**: соединение идёт под `postgres`, но каждый запрос выполняется в транзакции с `SET LOCAL ROLE authenticated` и `set_config('request.jwt.claims', {sub, role}, true)`, где `sub` берётся из проверенного `auth.getUser()`. Вызовов Prisma вне этой обёртки (`withRls`) в коде нет.
 - Серверные проверки роли в Server Actions дублируют БД для понятных сообщений, но решает БД. Ошибки триггеров переводятся на русский (`src/lib/errors.ts`).
+- **Фото (Storage)**: bucket `task-photos` приватный, файлы по пути `<task_id>/<brief|result>/<uuid>.<ext>`. Политики `storage.objects` и RLS таблицы `task_attachments` проверяют одно и то же: постановщик видит/добавляет/удаляет всё; исполнитель видит фото только своих задач и добавляет только `result` к своей задаче в статусе «В работе»/«На доработке», удалять не может. Тип (JPG/PNG/WebP) и 5 МБ проверяет bucket, лимит 5 фото на задачу и тип — политика и триггер. Показ — подписанные ссылки на 1 час.
 - Регистрации в UI нет, в Supabase signup выключен. `service_role` в коде и репозитории отсутствует.
 
 ## Деплой (Vercel)
