@@ -1,0 +1,18 @@
+# Локальный Supabase CLI. Облачный проект настраивается в Dashboard (см. docs/ASSUMPTIONS.md).
+project_id = "crm-objects-tasks"
+
+[api]
+schemas = ["public"]
+
+[db.seed]
+enabled = true
+sql_paths = ["./seed.sql"]
+
+[auth]
+site_url = "http://localhost:3000"
+# Открытая регистрация отключена (ТЗ, п. 3.5)
+enable_signup = false
+
+[auth.email]
+enable_signup = false
+enable_confirmations = false
