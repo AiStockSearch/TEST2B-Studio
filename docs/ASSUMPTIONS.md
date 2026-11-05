@@ -25,8 +25,8 @@
 - `anon` не имеет доступа ни к чему.
 
 ## RLS
-- RLS включён на всех 4 таблицах, `FORCE ROW LEVEL SECURITY` тоже. Хелперы `is_manager()` и `has_task_in_object()` объявлены как SECURITY DEFINER, STABLE, `search_path = public`. Они читают `profiles`/`tasks` в обход RLS, поэтому рекурсии политик objects↔tasks нет.
-- Риск: при FORCE RLS definer-функции работают только потому, что владелец (`postgres` в Supabase) имеет BYPASSRLS. Локально `postgres` является суперпользователем. При выкладке нужно проверить в облаке тем же тест-скриптом.
+- RLS включён на всех 4 таблицах, `FORCE ROW LEVEL SECURITY` тоже. Хелперы `is_manager()` и `has_task_in_object()` объявлены как SECURITY DEFINER, STABLE, `search_path = public` и лежат в схеме `private`, которая не опубликована в API. Так их нельзя вызвать через `/rest/v1/rpc` (замечание Supabase Advisor 0029, исправлено миграцией 0004). Из API вызывается только `change_task_status`, это сделано намеренно. Они читают `profiles`/`tasks` в обход RLS, поэтому рекурсии политик objects↔tasks нет.
+- Риск: при FORCE RLS definer-функции работают только потому, что владелец (`postgres` в Supabase) имеет BYPASSRLS. Локально `postgres` является суперпользователем. В облаке это проверено: `postgres` там имеет `rolbypassrls = true`, и тест-скрипт `tests/rls_and_workflow.cloud.test.sql` проходит полностью.
 - Исполнитель вообще не имеет политики UPDATE на `tasks`: свои статусы он меняет только через RPC.
 
 ## Регистрация
@@ -38,3 +38,15 @@
 
 ## Тесты
 - `supabase/tests/rls_and_workflow.test.sql` проверяет 40 сценариев в одной транзакции с `rollback`. Скрипт рассчитан на пустую базу без seed. Для прогона на голом Postgres есть заглушки `supabase/local-stubs/` (роли anon/authenticated, `auth.users`, `auth.uid()`, дефолтные гранты как в Supabase) и `tests/run-local.sh`.
+
+## Облако (05.11)
+- В проекте применены миграции 0001–0004. Заглушки из `local-stubs` в облако не применялись.
+- Пользователей создают в Dashboard или SQL-скриптом вне репозитория. Пароли в репозитории не хранятся.
+- Через REST от имени worker1 проверено:
+  - вход проходит, worker1 видит только свои 4 задачи;
+  - чужие задачи и их история возвращают пустой ответ;
+  - PATCH title и DELETE возвращают 0 строк;
+  - PATCH status, POST в tasks и history, DELETE history и PATCH своей роли получают 403;
+  - запрещённый переход через RPC получает 403, вызов на чужую задачу возвращает ошибку `task not found`;
+  - `rpc/is_manager` отвечает 404, а anon получает 401.
+- Включить в Dashboard: Authentication → Sign In / Providers → выключить «Allow new users to sign up»; Auth → Password security → «Leaked password protection» (замечание Advisor).
