@@ -5,3 +5,10 @@ node_modules
 .next
 supabase/.temp
 supabase/.branches
+*.local.md
+next-env.d.ts
+*.tsbuildinfo
+/test-results
+/playwright-report
+src/generated
+/e2e-results
