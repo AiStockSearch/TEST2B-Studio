@@ -39,6 +39,7 @@ async function main() {
   const own = all.filter((t) => t.assignee_id === w.id);
   ok(foreign.length > 0 && own.length > 0, `есть свои (${own.length}) и чужие (${foreign.length}) задачи для проверки`);
   await checks(w.sb, w.id, own, foreign, all);
+  await attachmentChecks(m.sb, w.sb, w.id, all);
   if (failed) { console.error(`\n${failed} проверок не прошло`); process.exit(1); }
   console.log("\nВсе проверки пройдены");
 }
@@ -74,6 +75,55 @@ async function checks(sb: SupabaseClient, uid: string, own: T[], foreign: T[], a
   ok(objs.length === ownObjects.size && objs.every((o) => ownObjects.has(o.id)), "видны только объекты со своими задачами");
   const ins = await sb.from("tasks").insert({ title: "x", object_id: all[0].object_id, assignee_id: uid }).select("id");
   ok(!!ins.error, "исполнитель не создаёт задачи");
+}
+
+// 1x1 PNG
+const PNG = Uint8Array.from(atob("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="), (c) => c.charCodeAt(0));
+const png = () => new Blob([PNG], { type: "image/png" });
+
+/** Вложения: временные задачи + фото от постановщика, проверки от имени исполнителя, затем уборка. */
+async function attachmentChecks(m: SupabaseClient, w: SupabaseClient, wid: string, all: T[]) {
+  const workers = (await m.from("profiles").select("id").eq("role", "worker")).data ?? [];
+  const other = workers.find((p) => p.id !== wid)!.id;
+  const obj = all[0].object_id;
+  const mk = async (assignee: string) =>
+    (await m.from("tasks").insert({ title: "SEC проверка вложений", object_id: obj, assignee_id: assignee }).select("id").single()).data!.id as string;
+  const own = await mk(wid), foreign = await mk(other);
+  const paths: string[] = [];
+  try {
+    for (const t of [own, foreign]) {
+      const p = `${t}/brief/${crypto.randomUUID()}.png`;
+      const up = await m.storage.from("task-photos").upload(p, png(), { contentType: "image/png" });
+      ok(!up.error, `постановщик загружает фото-ТЗ (${up.error?.message ?? "ok"})`);
+      ok(!(await m.from("task_attachments").insert({ task_id: t, kind: "brief", storage_path: p })).error, "постановщик регистрирует вложение");
+      paths.push(p);
+    }
+    const seen = (await w.from("task_attachments").select("task_id")).data ?? [];
+    ok(seen.every((a) => a.task_id !== foreign) && seen.some((a) => a.task_id === own), "исполнитель видит вложения только своих задач");
+    const signed = await w.storage.from("task-photos").createSignedUrl(paths[1], 60);
+    ok(!signed.data?.signedUrl, "исполнитель не получает ссылку на чужое фото");
+    const signedOwn = await w.storage.from("task-photos").createSignedUrl(paths[0], 60);
+    ok(!!signedOwn.data?.signedUrl, "исполнитель получает ссылку на фото своей задачи");
+    const upForeign = await w.storage.from("task-photos").upload(`${foreign}/result/${crypto.randomUUID()}.png`, png(), { contentType: "image/png" });
+    ok(!!upForeign.error, "исполнитель не загружает фото в чужую задачу");
+    const upNew = await w.storage.from("task-photos").upload(`${own}/result/${crypto.randomUUID()}.png`, png(), { contentType: "image/png" });
+    ok(!!upNew.error, "исполнитель не загружает результат, пока задача «Новая»");
+    const rowForeign = await w.from("task_attachments").insert({ task_id: foreign, kind: "result", storage_path: `${foreign}/result/${crypto.randomUUID()}.png` });
+    ok(!!rowForeign.error, "исполнитель не добавляет запись к чужой задаче");
+    const brief = await w.from("task_attachments").insert({ task_id: own, kind: "brief", storage_path: `${own}/brief/${crypto.randomUUID()}.png` });
+    ok(!!brief.error, "исполнитель не добавляет фото-ТЗ (brief)");
+    const del = await w.from("task_attachments").delete().eq("task_id", own).select("id");
+    ok(!del.data?.length, "исполнитель не удаляет вложения");
+    const rm = await w.storage.from("task-photos").remove([paths[0]]);
+    ok(!rm.data?.length, "исполнитель не удаляет файлы из Storage");
+    const gif = await m.storage.from("task-photos").upload(`${own}/brief/${crypto.randomUUID()}.png`, new Blob([PNG], { type: "image/gif" }), { contentType: "image/gif" });
+    ok(!!gif.error, "bucket не принимает не-картинки (mime)");
+    const anonUp = await createClient(URL, KEY, { auth: { persistSession: false } }).storage.from("task-photos").createSignedUrl(paths[0], 60);
+    ok(!anonUp.data?.signedUrl, "anon не получает ссылки на фото");
+  } finally {
+    await m.storage.from("task-photos").remove(paths);
+    await m.from("tasks").delete().in("id", [own, foreign]);
+  }
 }
 
 main().catch((e) => { console.error(e); process.exit(1); });
