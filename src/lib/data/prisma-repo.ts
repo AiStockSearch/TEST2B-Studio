@@ -10,7 +10,16 @@ import { NotFoundOrForbidden, type HistoryRow, type ObjectRow, type Repo, type T
 const g = globalThis as unknown as { __prisma?: PrismaClient };
 function client(): PrismaClient {
   if (!g.__prisma) {
-    const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL!, max: 3 });
+    // Supabase pooler: TLS обязателен, цепочка сертификата Supabase не в системном хранилище —
+    // шифруем, но не проверяем CA (sslmode из строки убираем, чтобы pg не переопределил ssl).
+    const url = new URL(process.env.DATABASE_URL!);
+    url.searchParams.delete("sslmode");
+    const local = ["localhost", "127.0.0.1"].includes(url.hostname);
+    const adapter = new PrismaPg({
+      connectionString: url.toString(),
+      max: 3,
+      ssl: local ? undefined : { rejectUnauthorized: false },
+    });
     g.__prisma = new PrismaClient({ adapter });
   }
   return g.__prisma;
@@ -83,10 +92,15 @@ export function prismaRepo(userId: string): Repo {
       comment: h.comment, changed_at: h.changed_at.toISOString(), actor_name: h.actor.full_name,
     }))),
     // Пишем только разрешённые колонки (GRANT INSERT/UPDATE по колонкам); status/author ставит триггер
-    createTask: (input) => run(async (tx) => (await tx.tasks.create({
-      data: { title: input.title, description: input.description, object_id: input.object_id, assignee_id: input.assignee_id } as Prisma.tasksUncheckedCreateInput,
-      select: { id: true },
-    })).id),
+    // Raw INSERT: Prisma сам подставляет @default(now())/status в INSERT, а у authenticated
+    // есть grant insert только на (id, title, description, object_id, assignee_id).
+    createTask: (input) => run(async (tx) => {
+      const rows = await tx.$queryRaw<{ id: string }[]>`
+        insert into public.tasks (title, description, object_id, assignee_id)
+        values (${input.title}, ${input.description}, ${input.object_id}::uuid, ${input.assignee_id}::uuid)
+        returning id`;
+      return rows[0].id;
+    }),
     updateTask: (id, input) => run((tx) => mustAffect(tx.tasks.updateMany({ where: { id }, data: input }))),
     deleteTask: (id) => run((tx) => mustAffect(tx.tasks.deleteMany({ where: { id } }))),
     // Смена статуса — только через SQL-функцию (триггер проверяет переход и пишет историю)

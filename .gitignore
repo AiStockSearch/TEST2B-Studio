@@ -12,3 +12,5 @@ next-env.d.ts
 /playwright-report
 src/generated
 /e2e-results
+.vercel
+.env*
