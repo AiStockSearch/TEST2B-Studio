@@ -82,6 +82,20 @@ export function supabaseRepo(sb: SupabaseClient): Repo {
     },
     async updateTask(id, input) { affected(await sb.from("tasks").update(input).eq("id", id).select("id")); },
     async deleteTask(id) { affected(await sb.from("tasks").delete().eq("id", id).select("id")); },
+    async listAttachments(taskId) {
+      const { data } = check(await sb.from("task_attachments")
+        .select("id,kind,storage_path,created_at,uploader:profiles(full_name)").eq("task_id", taskId).order("created_at"));
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      return (data ?? []).map((a: any) => ({ id: a.id, kind: a.kind, storage_path: a.storage_path, created_at: a.created_at, uploader_name: a.uploader?.full_name ?? "—" }));
+    },
+    async addAttachments(taskId, kind, paths) {
+      check(await sb.from("task_attachments").insert(paths.map((storage_path) => ({ task_id: taskId, kind, storage_path }))));
+    },
+    async deleteAttachment(id) {
+      const { data } = check(await sb.from("task_attachments").delete().eq("id", id).select("storage_path"));
+      if (!data?.length) throw new NotFoundOrForbidden();
+      return data[0].storage_path as string;
+    },
     async changeStatus(id, to: TaskStatus, comment) {
       check(await sb.rpc("change_task_status", { p_task_id: id, p_new_status: to, p_comment: comment }));
     },

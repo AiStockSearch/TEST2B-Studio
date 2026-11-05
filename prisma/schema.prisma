@@ -14,6 +14,11 @@ enum user_role {
   worker
 }
 
+enum attachment_kind {
+  brief
+  result
+}
+
 enum task_status {
   new
   in_progress
@@ -31,6 +36,7 @@ model profiles {
   assigned   tasks[]     @relation("tasks_assignee")
   authored   tasks[]     @relation("tasks_author")
   history    task_status_history[]
+  attachments task_attachments[]
 }
 
 model objects {
@@ -57,6 +63,7 @@ model tasks {
   assignee    profiles    @relation("tasks_assignee", fields: [assignee_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   author      profiles    @relation("tasks_author", fields: [author_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   history     task_status_history[]
+  attachments task_attachments[]
 
   @@index([object_id])
   @@index([assignee_id, status])
@@ -75,4 +82,18 @@ model task_status_history {
   actor       profiles     @relation(fields: [changed_by], references: [id], onDelete: Restrict, onUpdate: NoAction)
 
   @@index([task_id, changed_at])
+}
+
+// Вложения: запись пишется raw INSERT (grant только на task_id, kind, storage_path)
+model task_attachments {
+  id           String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  task_id      String          @db.Uuid
+  kind         attachment_kind
+  storage_path String          @unique
+  uploaded_by  String          @default(dbgenerated("auth.uid()")) @db.Uuid
+  created_at   DateTime        @default(dbgenerated("now()")) @db.Timestamptz(6)
+  task         tasks           @relation(fields: [task_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  uploader     profiles        @relation(fields: [uploaded_by], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@index([task_id, kind])
 }

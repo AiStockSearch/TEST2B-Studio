@@ -2,7 +2,10 @@
 import { useActionState, useEffect, useState } from "react";
 import { Loader2, Pencil, Plus } from "lucide-react";
 import { toast } from "sonner";
-import { saveTask } from "@/app/actions";
+import { useRouter } from "next/navigation";
+import { registerAttachments, saveTask, type ActionState } from "@/app/actions";
+import { PhotoPicker } from "@/components/photo-picker";
+import { uploadPhotos } from "@/lib/attachments/upload";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -20,9 +23,27 @@ export function TaskFormDialog({ task, objects, workers, defaultObjectId, lockAs
   lockAssignee?: boolean;
 }) {
   const [open, setOpen] = useState(false);
-  const [state, action, pending] = useActionState(saveTask, undefined);
+  const router = useRouter();
+  const [files, setFiles] = useState<File[]>([]);
+  const [fileError, setFileError] = useState<string | null>(null);
+  // Создание: сначала задача (нужен id), затем фото в Storage и запись о них, затем переход в карточку
+  const [state, action, pending] = useActionState(async (prev: ActionState, fd: FormData): Promise<ActionState> => {
+    const r = await saveTask(prev, fd);
+    if (!r?.ok || task || !r.id) return r;
+    if (files.length) {
+      try {
+        const paths = await uploadPhotos(r.id, "brief", files);
+        const reg = await registerAttachments(r.id, "brief", paths);
+        if (reg?.error) toast.error(`Задача создана, но фото не прикреплены: ${reg.error}`);
+      } catch (e) {
+        toast.error(`Задача создана, но фото не прикреплены: ${(e as Error).message}`);
+      }
+    }
+    router.push(`/tasks/${r.id}`);
+    return r;
+  }, undefined);
   useEffect(() => {
-    if (state?.ok) { setOpen(false); toast.success("Задача сохранена"); }
+    if (state?.ok) { setOpen(false); setFiles([]); toast.success("Задача сохранена"); }
   }, [state]);
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -58,10 +79,16 @@ export function TaskFormDialog({ task, objects, workers, defaultObjectId, lockAs
               {lockAssignee && <p className="text-xs text-muted-foreground">Пока задача на проверке, исполнителя менять нельзя</p>}
             </div>
           </div>
+          {!task && (
+            <div className="grid gap-2">
+              <Label htmlFor="brief-photos">Фото к заданию <span className="text-muted-foreground">(необязательно)</span></Label>
+              <PhotoPicker id="brief-photos" files={files} onChange={setFiles} onError={setFileError} disabled={pending} />
+            </div>
+          )}
           {!task && <p className="text-xs text-muted-foreground">Задача создаётся в статусе «Новая».</p>}
-          <FormError message={state?.error} />
+          <FormError message={fileError ?? state?.error} />
           <DialogFooter>
-            <Button type="submit" disabled={pending}>{pending && <Loader2 className="animate-spin" />} Сохранить</Button>
+            <Button type="submit" disabled={pending}>{pending && <Loader2 className="animate-spin" />} {pending && files.length && !task ? "Сохраняем и загружаем фото…" : "Сохранить"}</Button>
           </DialogFooter>
         </form>
       </DialogContent>

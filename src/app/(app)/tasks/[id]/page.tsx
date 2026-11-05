@@ -8,16 +8,23 @@ import { TaskFormDialog } from "@/components/task-form-dialog";
 import { ConfirmDelete } from "@/components/confirm-delete";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { formatDate } from "@/lib/format";
-import { availableTransitions, STATUS_LABEL } from "@/lib/workflow";
+import { availableTransitions, STATUS_LABEL, waitingReason } from "@/lib/workflow";
+import { withSignedUrls } from "@/lib/attachments/server";
+import { TaskGallery } from "@/components/task-gallery";
 import { StatusActions } from "./status-actions";
 
 export default async function TaskPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   if (!/^[0-9a-f-]{36}$/i.test(id)) notFound();
   const { user, repo } = await requireSession();
-  const [task, history] = await Promise.all([repo.getTask(id), repo.getHistory(id)]);
+  const [task, history, rawFiles] = await Promise.all([repo.getTask(id), repo.getHistory(id), repo.listAttachments(id)]);
   if (!task) notFound(); // RLS: чужая задача для исполнителя неотличима от несуществующей
   const isManager = user.role === "manager";
+  const files = await withSignedUrls(rawFiles);
+  const brief = files.filter((f) => f.kind === "brief");
+  const result = files.filter((f) => f.kind === "result");
+  const isAssignee = user.id === task.assignee_id;
+  const workerCanAdd = isAssignee && (task.status === "in_progress" || task.status === "rework");
   const actions = availableTransitions(user, task).map((t) => ({ to: t.to, label: t.label, commentRequired: t.commentRequired }));
   const [objects, workers] = isManager && task.status !== "accepted"
     ? await Promise.all([repo.listObjects(), repo.listWorkers()]) : [[], []];
@@ -62,10 +69,19 @@ export default async function TaskPage({ params }: { params: Promise<{ id: strin
             </CardContent>
           </Card>
           <Card>
+            <CardHeader><CardTitle className="text-base">Фото</CardTitle></CardHeader>
+            <CardContent className="grid gap-5">
+              <TaskGallery taskId={task.id} kind="brief" items={brief} canAdd={isManager && task.status !== "accepted"} canDelete={isManager} />
+              <TaskGallery taskId={task.id} kind="result" items={result} canAdd={workerCanAdd} canDelete={isManager}
+                addHint="Фото результата можно приложить и при отправке на проверку." />
+              {!brief.length && !result.length && !isManager && !workerCanAdd && <p className="text-sm text-muted-foreground">Фото нет</p>}
+            </CardContent>
+          </Card>
+          <Card>
             <CardHeader><CardTitle className="text-base">Действия</CardTitle></CardHeader>
             <CardContent>
-              <StatusActions taskId={task.id} actions={actions}
-                emptyText={task.status === "accepted" ? "Задача принята и закрыта." : `Сейчас ход ${["review"].includes(task.status) ? "постановщика" : "исполнителя"}: для вас действий нет.`} />
+              <StatusActions taskId={task.id} status={task.status} actions={actions} resultCount={result.length}
+                emptyText={waitingReason(user, task, task.assignee_name)} />
             </CardContent>
           </Card>
         </div>

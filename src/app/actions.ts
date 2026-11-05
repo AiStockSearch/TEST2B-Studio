@@ -7,8 +7,10 @@ import { createClient } from "@/lib/supabase/server";
 import { requireSession } from "@/lib/session";
 import { humanizeDbError } from "@/lib/errors";
 import { checkTransition, STATUSES, type TaskStatus } from "@/lib/workflow";
+import { BUCKET, MAX_FILES, pathPattern } from "@/lib/attachments/rules";
+import type { AttachmentKind } from "@/lib/data/types";
 
-export type ActionState = { error?: string; ok?: boolean } | undefined;
+export type ActionState = { error?: string; ok?: boolean; id?: string } | undefined;
 
 const s = (fd: FormData, k: string) => String(fd.get(k) ?? "").trim();
 
@@ -93,7 +95,8 @@ export async function saveTask(_: ActionState, fd: FormData): Promise<ActionStat
     return { error: humanizeDbError(e) };
   }
   revalidatePath(`/objects/${parsed.data.object_id}`);
-  if (!id) redirect(`/tasks/${newId}`);
+  // при создании клиент сначала прикладывает фото (нужен id задачи), затем сам переходит в карточку
+  if (!id) return { ok: true, id: newId };
   revalidatePath(`/tasks/${id}`);
   return { ok: true };
 }
@@ -102,8 +105,11 @@ export async function deleteTask(_: ActionState, fd: FormData): Promise<ActionSt
   const { session, error } = await managerOnly();
   if (error) return { error };
   const objectId = s(fd, "object_id");
+  const taskId = s(fd, "id");
   try {
-    await session.repo.deleteTask(s(fd, "id"));
+    const files = await session.repo.listAttachments(taskId);
+    await session.repo.deleteTask(taskId); // записи вложений удаляются каскадом
+    if (files.length) await (await createClient()).storage.from(BUCKET).remove(files.map((f) => f.storage_path));
   } catch (e) {
     return { error: humanizeDbError(e) };
   }
@@ -112,10 +118,13 @@ export async function deleteTask(_: ActionState, fd: FormData): Promise<ActionSt
 }
 
 export async function changeStatus(_: ActionState, fd: FormData): Promise<ActionState> {
+  return setTaskStatus(s(fd, "id"), s(fd, "to") as TaskStatus, s(fd, "comment") || null);
+}
+
+/** Смена статуса: только через RPC change_task_status (триггер проверяет переход и пишет историю). */
+export async function setTaskStatus(id: string, to: TaskStatus, rawComment: string | null): Promise<ActionState> {
   const session = await requireSession();
-  const id = s(fd, "id");
-  const to = s(fd, "to") as TaskStatus;
-  const comment = s(fd, "comment") || null;
+  const comment = rawComment?.trim().slice(0, 2000) || null;
   if (!STATUSES.includes(to)) return { error: "Неизвестный статус" };
   try {
     const task = await session.repo.getTask(id);
@@ -129,5 +138,34 @@ export async function changeStatus(_: ActionState, fd: FormData): Promise<Action
   }
   revalidatePath(`/tasks/${id}`);
   revalidatePath("/my-tasks");
+  return { ok: true };
+}
+
+/** Регистрирует уже загруженные в Storage фото. Права проверяют RLS таблицы и политики storage. */
+export async function registerAttachments(taskId: string, kind: AttachmentKind, paths: string[]): Promise<ActionState> {
+  const session = await requireSession();
+  if (!["brief", "result"].includes(kind)) return { error: "Неизвестный тип вложения" };
+  if (!paths.length) return { ok: true };
+  if (paths.length > MAX_FILES || !paths.every((p) => pathPattern(taskId, kind).test(p))) return { error: "Некорректные файлы" };
+  try {
+    await session.repo.addAttachments(taskId, kind, paths);
+  } catch (e) {
+    if (/attachment limit/i.test(String((e as Error)?.message))) return { error: `Не больше ${MAX_FILES} фото этого типа` };
+    return { error: humanizeDbError(e) };
+  }
+  revalidatePath(`/tasks/${taskId}`);
+  return { ok: true };
+}
+
+export async function removeAttachment(id: string, taskId: string): Promise<ActionState> {
+  const { session, error } = await managerOnly();
+  if (error) return { error };
+  try {
+    const path = await session.repo.deleteAttachment(id);
+    await (await createClient()).storage.from(BUCKET).remove([path]);
+  } catch (e) {
+    return { error: humanizeDbError(e) };
+  }
+  revalidatePath(`/tasks/${taskId}`);
   return { ok: true };
 }

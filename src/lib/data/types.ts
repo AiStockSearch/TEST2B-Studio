@@ -9,6 +9,8 @@ export interface TaskRow {
 export interface HistoryRow {
   id: string; from_status: TaskStatus | null; to_status: TaskStatus; comment: string | null; changed_at: string; actor_name: string;
 }
+export type AttachmentKind = "brief" | "result";
+export interface AttachmentRow { id: string; kind: AttachmentKind; storage_path: string; created_at: string; uploader_name: string }
 export interface TaskInput { title: string; description: string; object_id: string; assignee_id: string }
 export interface ObjectInput { name: string; address: string }
 export interface TaskFilter { objectId?: string; assigneeId?: string; status?: TaskStatus }
@@ -28,6 +30,10 @@ export interface Repo {
   createTask(input: TaskInput): Promise<string>;
   updateTask(id: string, input: TaskInput): Promise<void>;
   deleteTask(id: string): Promise<void>;
+  listAttachments(taskId: string): Promise<AttachmentRow[]>;
+  addAttachments(taskId: string, kind: AttachmentKind, paths: string[]): Promise<void>;
+  /** возвращает storage_path удалённой записи */
+  deleteAttachment(id: string): Promise<string>;
   changeStatus(id: string, to: TaskStatus, comment: string | null): Promise<void>;
 }
 

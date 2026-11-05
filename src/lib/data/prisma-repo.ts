@@ -2,7 +2,7 @@ import "server-only";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient, Prisma } from "@/generated/prisma/client";
 import type { TaskStatus } from "@/lib/workflow";
-import { NotFoundOrForbidden, type HistoryRow, type ObjectRow, type Repo, type TaskRow } from "./types";
+import { NotFoundOrForbidden, type AttachmentKind, type HistoryRow, type ObjectRow, type Repo, type TaskRow } from "./types";
 
 // Один клиент на процесс. Соединение идёт под ролью postgres (BYPASSRLS),
 // поэтому КАЖДЫЙ запрос обёрнут в withRls(): внутри транзакции роль понижается до authenticated
@@ -103,6 +103,21 @@ export function prismaRepo(userId: string): Repo {
     }),
     updateTask: (id, input) => run((tx) => mustAffect(tx.tasks.updateMany({ where: { id }, data: input }))),
     deleteTask: (id) => run((tx) => mustAffect(tx.tasks.deleteMany({ where: { id } }))),
+    listAttachments: (taskId) => run(async (tx) => (await tx.task_attachments.findMany({
+      where: { task_id: taskId }, orderBy: { created_at: "asc" }, include: { uploader: { select: { full_name: true } } },
+    })).map((a) => ({ id: a.id, kind: a.kind as AttachmentKind, storage_path: a.storage_path, created_at: a.created_at.toISOString(), uploader_name: a.uploader.full_name }))),
+    addAttachments: (taskId, kind, paths) => run(async (tx) => {
+      for (const p of paths) {
+        await tx.$executeRaw`insert into public.task_attachments (task_id, kind, storage_path)
+          values (${taskId}::uuid, ${kind}::public.attachment_kind, ${p})`;
+      }
+    }),
+    deleteAttachment: (id) => run(async (tx) => {
+      const a = await tx.task_attachments.findUnique({ where: { id }, select: { storage_path: true } });
+      if (!a) throw new NotFoundOrForbidden();
+      await mustAffect(tx.task_attachments.deleteMany({ where: { id } }));
+      return a.storage_path;
+    }),
     // Смена статуса — только через SQL-функцию (триггер проверяет переход и пишет историю)
     changeStatus: (id, to, comment) => run(async (tx) => {
       try {

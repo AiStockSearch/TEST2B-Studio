@@ -66,3 +66,15 @@ export function checkTransition(
   if (t.commentRequired && !comment?.trim()) return "Для возврата на доработку нужен комментарий";
   return null;
 }
+
+/** Почему у пользователя нет действий в этом статусе (текст для карточки задачи). */
+export function waitingReason(viewer: Viewer, task: { status: TaskStatus; assignee_id: string }, assigneeName = "исполнитель"): string {
+  if (task.status === "accepted") return "Задача принята и закрыта. Дальнейших действий нет.";
+  if (task.status === "review")
+    return viewer.role === "manager" ? "" : "Задача на проверке у постановщика. Дождитесь решения: принять или вернуть на доработку.";
+  if (viewer.role === "manager") {
+    const next = { new: "взять задачу в работу", in_progress: "выполнить работу и отправить на проверку", rework: "взять задачу в доработку" }[task.status];
+    return `Сейчас ход исполнителя (${assigneeName}): ${next}. Постановщик подключится, когда задача придёт на проверку.`;
+  }
+  return "Это действие доступно только назначенному исполнителю.";
+}
