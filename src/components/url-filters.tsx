@@ -80,6 +80,7 @@ export function StatusChips({ counts, current, base }: { counts: Record<TaskStat
   return (
     <div className="flex flex-wrap gap-2" data-testid="status-chips">
       {chip("all", "Все", total, current === "all", href(null))}
+      {chip("active", "Незакрытые", total - counts.accepted, current === "active", href("active"))}
       {STATUSES.map((s) => chip(s, STATUS_LABEL[s], counts[s], current === s, href(s)))}
     </div>
   );
