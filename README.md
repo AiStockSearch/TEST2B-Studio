@@ -22,7 +22,9 @@ src/middleware.ts      защита маршрутов и обновление �
 src/app/               экраны: /login, /objects, /objects/[id], /tasks/[id], /my-tasks
 scripts/security-check.ts  прямые запросы к Supabase от имени исполнителя: всё запрещённое должно отклоняться
 tests/, e2e/           unit и e2e
-docs/ASSUMPTIONS.md    решения и допущения
+docs/ASSUMPTIONS.md    решения и допущения (подробно)
+docs/DECISIONS.md      краткий список решений для сдачи
+docs/EXPLAINER_FOR_MANAGER.md  объяснение для руководителя
 ```
 
 ## Запуск локально

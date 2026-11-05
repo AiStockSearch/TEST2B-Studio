@@ -49,7 +49,7 @@
   - PATCH status, POST в tasks и history, DELETE history и PATCH своей роли получают 403;
   - запрещённый переход через RPC получает 403, вызов на чужую задачу возвращает ошибку `task not found`;
   - `rpc/is_manager` отвечает 404, а anon получает 401.
-- Включить в Dashboard: Authentication → Sign In / Providers → выключить «Allow new users to sign up»; Auth → Password security → «Leaked password protection» (замечание Advisor).
+- Облако: «Allow new users to sign up» выключен (проверено: signup отвечает `signup_disabled`). Имеет смысл включить Auth → Password security → «Leaked password protection» (замечание Advisor).
 
 ## Фронтенд (Next.js)
 - **Next.js App Router + Server Actions.** Все данные читаются и пишутся на сервере. В браузер попадают только `NEXT_PUBLIC_SUPABASE_URL` и publishable-ключ, нужные для входа.
