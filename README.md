@@ -64,4 +64,6 @@ npm run lint && npm run typecheck
 - Регистрации в UI нет, в Supabase signup выключен. `service_role` в коде и репозитории отсутствует.
 
 ## Деплой (Vercel)
+**Прод: https://test2b-crm.vercel.app** (драйвер Prisma, Session pooler). Тестовые учётки передаются отдельно.
+
 Импортировать репозиторий как Next.js-проект (корень репозитория), Node 22+. Задать env: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `DATABASE_URL` (Session pooler, только Production/Preview, не публичная). `npm run build` сам выполняет `prisma generate`. В Supabase → Authentication → URL Configuration добавить домен Vercel в Site URL.
